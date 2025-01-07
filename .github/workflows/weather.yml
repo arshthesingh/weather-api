@@ -2,8 +2,7 @@ name: Daily Weather to Supabase
 
 on:
   schedule:
-    # Runs at 8:00 AM EST daily
-    # 8 AM EST = 13:00 UTC in standard time
+    # Runs at 8:00 AM EST (13:00 UTC) daily
     - cron: '0 13 * * *'
   workflow_dispatch:
 
