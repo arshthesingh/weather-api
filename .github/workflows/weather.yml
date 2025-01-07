@@ -1,0 +1,33 @@
+name: Daily Weather to Supabase
+
+on:
+  schedule:
+    # Runs at 8:00 AM EST daily
+    # 8 AM EST = 13:00 UTC in standard time
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-daily:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install requests supabase
+
+      - name: Run weather script
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          BASE_URL: ${{ secrets.BASE_URL }}
+          API_KEY: ${{ secrets.API_KEY }}
+        run: |
+          python weather_script.py
