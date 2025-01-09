@@ -1,8 +1,8 @@
-name: Daily Weather to Supabase
+name: Daily Weather to Supabase & Email
 
 on:
   schedule:
-    # Runs at 8:00 AM EST (13:00 UTC) daily
+    # Runs at 8:00 AM EST daily
     - cron: '0 13 * * *'
   workflow_dispatch:
 
@@ -20,7 +20,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests supabase
+          pip install -r requirements.txt
 
       - name: Run weather script
         env:
@@ -28,5 +28,8 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           BASE_URL: ${{ secrets.BASE_URL }}
           API_KEY: ${{ secrets.API_KEY }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
         run: |
           python weather_script.py
