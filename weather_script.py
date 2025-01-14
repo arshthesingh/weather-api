@@ -7,81 +7,61 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import logging
 
+# Logging
+logging.basicConfig(level=logging.INFO)
 
-# --------------- Data Ingestion Phase --------------- #
-# ---------------------------------------------------- #
+def fetch_weather_data(base_url, lat, lon, api_key):
+    request_url = f"{base_url}?lat={lat}&lon={lon}&appid={api_key}"
+    response = requests.get(request_url)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        logging.error(f"Failed to fetch weather data: {response.status_code}")
+        return {}
 
-# Get secrets from repo variables
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
-BASE_URL = os.environ["BASE_URL"]
-API_KEY = os.environ["API_KEY"]
-EMAIL_USER = os.environ["EMAIL_USER"]
-EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
-TO_EMAIL = os.environ["TO_EMAIL"]
+def parse_weather_data(data, lat=40.7128, lon=-74.0060, city='New York'):
+    forecast_list = data.get('list', [])
+    first_8_filtered = []
+    for entry in forecast_list[:8]:
+        temp_f = (entry["main"]["temp"] - 273.15) * 9 / 5 + 32
+        feels_like_f = (entry["main"]["feels_like"] - 273.15) * 9 / 5 + 32
 
-# Split the TO_EMAIL string into a list of emails
-to_emails = [email.strip() for email in TO_EMAIL.split(",")]
+        filtered_data = {
+            "temp_f": round(temp_f, 2),
+            "feels_like_f": round(feels_like_f, 2),
+            "humidity": entry["main"]["humidity"],
+            "main": entry["weather"][0]["main"],
+            "description": entry["weather"][0]["description"],
+            "speed": entry["wind"]["speed"],
+            "deg": entry["wind"]["deg"],
+            "gust": entry["wind"].get("gust"),
+            "visibility": entry.get("visibility"),
+            "dt_txt": entry["dt_txt"],
+            "lat": float(lat),
+            "lon": float(lon),
+            "city": city
+        }
+        first_8_filtered.append(filtered_data)
+    return first_8_filtered
 
-# Initializing Supabase client
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+def insert_into_supabase(supabase_url, supabase_key, table_name, data):
+    supabase = create_client(supabase_url, supabase_key)
+    try:
+        response = supabase.table(table_name).insert(data).execute()
+        logging.info(f"Data inserted into Supabase: {response}")
+    except Exception as e:
+        logging.error(f"Error inserting data into Supabase: {e}")
 
-lat = 40.7128  
-lon = -74.0060 
-city = 'New York'
-
-request_url = f"{BASE_URL}?lat={lat}&lon={lon}&appid={API_KEY}"
-print("Request URL:", request_url)
-
-response = requests.get(request_url)
-if response.status_code == 200:
-    data = response.json()
-    forecast_list = data['list'] # Extracting the 'list' key
-else:
-    print("An error occurred.")
-    data = {}
-    forecast_list = []
-
-# Extracting the first 8 entries (data is for 3 hour intervals, so this would give us 24 hours)
-first_8_filtered = []
-for entry in forecast_list[:8]:
-    # Converting temperature from K(elvin) to F(ahrenheit)
-    temp_f = (entry["main"]["temp"] - 273.15) * 9 / 5 + 32
-    feels_like_f = (entry["main"]["feels_like"] - 273.15) * 9 / 5 + 32
-
-    filtered_data = {
-        "temp_f": round(temp_f, 2),
-        "feels_like_f": round(feels_like_f, 2),
-        "humidity": entry["main"]["humidity"],
-        "main": entry["weather"][0]["main"],
-        "description": entry["weather"][0]["description"],
-        "speed": entry["wind"]["speed"],
-        "deg": entry["wind"]["deg"],
-        "gust": entry["wind"].get("gust"),
-        "visibility": entry.get("visibility"),
-        "dt_txt": entry["dt_txt"],
-        "lat": lat,
-        "lon": lon,
-        "city": city
-    }
-    first_8_filtered.append(filtered_data)
-
-try:
-    response = supabase.table("weather").insert(first_8_filtered).execute()
-    print("Insert response:", response)
-except Exception as e:
-    print("Error inserting data:", e)
-
-
-# --------------- Email Sending Phase --------------- #
-# --------------------------------------------------- #
-
-# Defining what the email looks like
 def format_weather_data_html(data):
-    email_content = """
+    if not data:
+        city_name = 'Unknown City'
+    else:
+        city_name = data[0]['city']
+        
+    email_content = f"""
     <html>
         <body>
-            <h2>24-Hour Weather Forecast for New York</h2>
+            <h2>24-Hour Weather Forecast for {city_name}</h2>
             <table border="1" cellpadding="5" cellspacing="0">
                 <tr>
                     <th>Date & Time</th>
@@ -119,7 +99,7 @@ def format_weather_data_html(data):
 def send_html_email(subject, html_body, from_email, to_emails, email_password):
     msg = MIMEMultipart('alternative')
     msg['From'] = from_email
-    msg['To'] = ", ".join(to_emails)  # Join multiple emails with comma
+    msg['To'] = ", ".join(to_emails)
     msg['Subject'] = subject
 
     part = MIMEText(html_body, 'html', 'utf-8')
@@ -133,7 +113,6 @@ def send_html_email(subject, html_body, from_email, to_emails, email_password):
     except Exception as e:
         logging.error(f"Error sending HTML email: {e}")
 
-# Defining the threshold for inclement weather so we can then alert the user to it
 def determine_severe_weather(forecast_data):
     severe_conditions = []
     for entry in forecast_data:
@@ -156,9 +135,9 @@ def determine_severe_weather(forecast_data):
     severe_conditions = list(set(severe_conditions))
     return severe_conditions
 
-def generate_email_subject(severe_conditions):
+def generate_email_subject(severe_conditions, city):
     if not severe_conditions:
-        return "Your 24-Hour Weather Forecast for New York"
+        return f"Your 24-Hour Weather Forecast for {city}"
     condition_messages = {
         'RAIN': "RAIN EXPECTED IN THE NEXT 24 HOURS",
         'SNOW': "SNOW EXPECTED IN THE NEXT 24 HOURS",
@@ -168,22 +147,55 @@ def generate_email_subject(severe_conditions):
         'EXTREMELY HOT': "EXTREMELY HOT TEMPERATURES IN THE NEXT 24 HOURS"
     }
     priority = ['SNOW', 'ICE', 'RAIN', 'EXTREMELY HOT', 'EXTREMELY COLD', 'HIGH WINDS']
-    severe_conditions_sorted = sorted(severe_conditions, key=lambda x: priority.index(x) if x in priority else len(priority))
+    severe_conditions_sorted = sorted(
+        severe_conditions,
+        key=lambda x: priority.index(x) if x in priority else len(priority)
+    )
     alert_messages = [condition_messages[cond] for cond in severe_conditions_sorted]
     subject = "; ".join(alert_messages)
     return subject
 
-if first_8_filtered:
-    severe_conditions = determine_severe_weather(first_8_filtered)
-    logging.info(f"Severe conditions found: {severe_conditions}")
-    email_subject = generate_email_subject(severe_conditions)
-    email_body = format_weather_data_html(first_8_filtered)
-    send_html_email(
-        subject=email_subject,
-        html_body=email_body,
-        from_email=EMAIL_USER,
-        to_emails=to_emails,  # Pass the list of emails
-        email_password=EMAIL_PASSWORD
-    )
-else:
-    logging.warning("No weather data available to send via email.")
+def main():
+    
+    SUPABASE_URL = os.environ["SUPABASE_URL"]
+    SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+    BASE_URL = os.environ["BASE_URL"]
+    API_KEY = os.environ["API_KEY"]
+    EMAIL_USER = os.environ["EMAIL_USER"]
+    EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
+    TO_EMAIL = os.environ["TO_EMAIL"]
+    LATITUDE = os.environ["LATITUDE"]
+    LONGITUDE = os.environ["LONGITUDE"]
+    CITY = os.environ["CITY"]
+
+    # Split the TO_EMAIL string into a list of emails
+    to_emails = [email.strip() for email in TO_EMAIL.split(",")]
+
+    # Fetch weather data
+    weather_data = fetch_weather_data(BASE_URL, LATITUDE, LONGITUDE, API_KEY)
+    forecast = parse_weather_data(weather_data, lat=LATITUDE, lon=LONGITUDE, city=CITY)
+
+    # Insert into Supabase
+    if forecast:
+        insert_into_supabase(SUPABASE_URL, SUPABASE_KEY, "weather", forecast)
+    else:
+        logging.warning("No weather data to insert into Supabase.")
+
+    # Email Sending Phase
+    if forecast:
+        severe_conditions = determine_severe_weather(forecast)
+        logging.info(f"Severe conditions found: {severe_conditions}")
+        email_subject = generate_email_subject(severe_conditions, CITY)
+        email_body = format_weather_data_html(forecast)
+        send_html_email(
+            subject=email_subject,
+            html_body=email_body,
+            from_email=EMAIL_USER,
+            to_emails=to_emails,
+            email_password=EMAIL_PASSWORD
+        )
+    else:
+        logging.warning("No weather data available to send via email.")
+
+if __name__ == "__main__":
+    main()
