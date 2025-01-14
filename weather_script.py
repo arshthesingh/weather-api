@@ -8,7 +8,6 @@ from email.mime.multipart import MIMEMultipart
 import logging
 
 
-
 # --------------- Data Ingestion Phase --------------- #
 # ---------------------------------------------------- #
 
@@ -17,9 +16,12 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 BASE_URL = os.environ["BASE_URL"]
 API_KEY = os.environ["API_KEY"]
-EMAIL_USER= os.environ["EMAIL_USER"]
-EMAIL_PASSWORD= os.environ["EMAIL_PASSWORD"]
-TO_EMAIL= os.environ["TO_EMAIL"]
+EMAIL_USER = os.environ["EMAIL_USER"]
+EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
+TO_EMAIL = os.environ["TO_EMAIL"]
+
+# Split the TO_EMAIL string into a list of emails
+to_emails = [email.strip() for email in TO_EMAIL.split(",")]
 
 # Initializing Supabase client
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -71,7 +73,6 @@ except Exception as e:
     print("Error inserting data:", e)
 
 
-
 # --------------- Email Sending Phase --------------- #
 # --------------------------------------------------- #
 
@@ -115,10 +116,10 @@ def format_weather_data_html(data):
     """
     return email_content
 
-def send_html_email(subject, html_body, from_email, to_email, email_password):
+def send_html_email(subject, html_body, from_email, to_emails, email_password):
     msg = MIMEMultipart('alternative')
     msg['From'] = from_email
-    msg['To'] = to_email
+    msg['To'] = ", ".join(to_emails)  # Join multiple emails with comma
     msg['Subject'] = subject
 
     part = MIMEText(html_body, 'html', 'utf-8')
@@ -127,8 +128,8 @@ def send_html_email(subject, html_body, from_email, to_email, email_password):
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(from_email, email_password)
-            server.send_message(msg)
-        logging.info("HTML email sent.")
+            server.sendmail(from_email, to_emails, msg.as_string())
+        logging.info("HTML email sent to multiple recipients.")
     except Exception as e:
         logging.error(f"Error sending HTML email: {e}")
 
@@ -181,7 +182,7 @@ if first_8_filtered:
         subject=email_subject,
         html_body=email_body,
         from_email=EMAIL_USER,
-        to_email=TO_EMAIL,
+        to_emails=to_emails,  # Pass the list of emails
         email_password=EMAIL_PASSWORD
     )
 else:
